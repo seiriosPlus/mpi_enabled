@@ -26,22 +26,16 @@ service MPIService {
 message RequestContext {
     // Rank of source (integer).
     int32 src = 1;
-    // gRPC soruce name, IP:PORT
-    string gsrc = 2;
     // CPU or GPU
-    int32 device = 3;
+    int32 device = 2;
     // Number of elements in receive buffer (integer).
-    int32 buffer_size = 4;
+    int32 buffer_size = 3;
     // Message tag (integer).
-    int32 tag = 5;
+    int32 tag = 4;
 }
 
 // The response message containing the greetings
 message ReplyContext {
-    // receive server is ready or not. 0 -> ready, else -> not ready
-    int32 status = 1;
     // Rank of destination (integer).
-    int32 dst = 2;
-    // grpc of destination name, IP:PORT
-    string gdst = 3;
+    int32 dst = 1;
 }

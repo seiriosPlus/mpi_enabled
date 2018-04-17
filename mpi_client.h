@@ -26,11 +26,13 @@ namespace paddle {
             public:
                 MPIClient(std::shared_ptr <Channel> channel) : stub_(Greeter::NewStub(channel)) {}
 
-                void SendGRPCRequest(const RequestContext &req);
+                ReplyContext SendGRPCRequest(const RequestContext &req);
 
                 void SendRequest();
 
                 void SendMPIRequest(const char *buf, int count, int dst, int tag);
+
+                bool IsFinished();
 
             private:
                 std::unique_ptr <MPIService::Stub> stub_;
