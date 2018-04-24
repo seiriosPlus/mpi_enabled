@@ -9,7 +9,9 @@
 #include <string>
 
 #include <grpc++/grpc++.h>
+
 #include "mpi.grpc.pb.h"
+#include "var.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -19,26 +21,21 @@ using mpis::RequestContext;
 using mpis::ReplyContext;
 
 
-namespace paddle {
-    namespace operators {
-        namespace detail {
-            class MPIClient {
-            public:
-                MPIClient(std::shared_ptr <Channel> channel) : stub_(Greeter::NewStub(channel)) {}
+class MPIClient {
+public:
+    MPIClient(std::shared_ptr<Channel> channel, int src);
 
-                ReplyContext SendGRPCRequest(const RequestContext &req);
+    void SendGRPCRequest(const RequestContext &request, ReplyContext *reply);
 
-                void SendRequest();
+    void SendRequest(const Var &var);
 
-                void SendMPIRequest(const char *buf, int count, int dst, int tag);
+    void SendMPIRequest(const char *buf, int length, int dst, int tag);
 
-                bool IsFinished();
+    bool IsFinished();
 
-            private:
-                std::unique_ptr <MPIService::Stub> stub_;
-                int ready;
-                int done;
-            };
-        }
-    }
-}
+private:
+    std::unique_ptr<MPIService::Stub> stub_;
+    int src;
+    int grpc;
+    int mpi;
+};

@@ -26,10 +26,9 @@ service MPIService {
 message RequestContext {
     // Rank of source (integer).
     int32 src = 1;
-    // CPU or GPU
-    int32 device = 2;
+    string var_name = 2;
     // Number of elements in receive buffer (integer).
-    int32 buffer_size = 3;
+    int32 length = 3;
     // Message tag (integer).
     int32 tag = 4;
 }

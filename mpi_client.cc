@@ -2,53 +2,56 @@
 // Created by tangwei12 on 2018/4/2.
 //
 
+#include <iostream>
+#include <mpi.h>
+
 #include "mpi_client.h"
 
-paddle::operators::detail::MPIClient::MPIClient(std::shared_ptr <Channel> channel) {
 
+MPIClient::MPIClient(std::shared_ptr<Channel> channel, int src) : stub_(MPIService::NewStub(channel)) {
+    this->src = src;
+    this->grpc = 0;
+    this->mpi = 0;
 }
 
-ReplyContext paddle::operators::detail::MPIClient::SendGRPCRequest(const RequestContext &req) {
-    ReplyContext reply;
+void MPIClient::SendGRPCRequest(const RequestContext &request, ReplyContext *reply) {
     ClientContext context;
-    Status status = stub_->ISendRequest(&context, req, &reply);
-
-    if (reply.status() == status::ok()) {
-        return reply;
-    }
-
-    return nullptr;
+    Status status = stub_->ISendRequest(&context, request, reply);
+    this->grpc = status.ok() ? 1 : 0;
 }
 
-void paddle::operators::detail::MPIClient::SendRequest(int device,
-                                                       int src,
-                                                       const char *content,
-                                                       const char *dest_grpc) {
+void MPIClient::SendRequest(const Var &var) {
 
-    int size = sizeof(content);
-    int tag = 100;
+    RequestContext request;
+    request.set_src(this->src);
+    request.set_tag(var.tag);
+    request.set_length(var.length);
+    request.set_var_name(var.name);
 
-    RequestContext req;
-    req.set_device(device);
-    req.set_src(src);
-    req.set_buffer_size(size);
-    req.set_tag(tag);
+    ReplyContext reply;
 
-    ReplyContext reply = SendGRPCRequest(req);
+    SendGRPCRequest(request, &reply);
+    std::cout << "[MPIClient " << this->src << "]: " << " get SendGRPC status: " << this->grpc << " dst: "
+              << reply.dst()
+              << std::endl;
 
-    if (reply == nullptr) {
-        this->done = -1;
-        return;
-    }
-
-    SendMPIRequest(&content, size, reply.dst(), tag);
+//    SendMPIRequest(var.value.c_str(), var.length, reply.dst(), var.tag);
+//    std::cout << "[MPIClient " << this->src << "]: " << " SendMPIRequest to: dst: " << reply.dst() << " finished"
+//              << std::endl;
 }
 
-void paddle::operators::detail::MPIClient::SendMPIRequest(const char *buf, int count, int dst, int tag) {
-    MPI_Send(&buf, count, MPI_CHAR, dst, tag, MPI_COMM_WORLD);
-    this->done = 0;
+void MPIClient::SendMPIRequest(const char *buf, int length, int dst, int tag) {
+    MPI_Request request;
+
+    MPI_Isend(buf, length, MPI_CHAR, dst, tag, MPI_COMM_WORLD, &request);
+    std::cout << "[MPIClient " << this->src << "]: " << " MPI_Isend send data to destination, waiting " << std::endl;
+
+    MPI_Status status;
+    MPI_Wait(&request, &status);
+    this->mpi = 1;
+    std::cout << "[MPIClient " << this->src << "]: " << " MPI_Isend send data to destination, exit" << std::endl;
 }
 
-bool paddle::operators::detail::MPIClient::IsFinished() {
-    return this->done == 1;
+bool MPIClient::IsFinished() {
+    return this->mpi == 1;
 }

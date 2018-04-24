@@ -15,9 +15,10 @@ build_doc/
 .cproject
 .pydevproject
 .settings/
-Makefile
 .test_env/
 third_party/
+
+*.o
 
 *~
 bazel-*
