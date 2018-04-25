@@ -3,6 +3,7 @@
 //
 
 #include <iostream>
+#include <sstream>
 #include <thread>
 #include <grpc++/grpc++.h>
 #include <mpi.h>
@@ -23,7 +24,6 @@ using mpis::MPIService;
 /*************************************** CLIENT *******************************************/
 
 Var geneVar(std::string grpc, std::string name, std::string content, int tag) {
-
     content = content + std::to_string(tag);
     name = name + std::to_string(tag);
 
@@ -37,42 +37,52 @@ Var geneVar(std::string grpc, std::string name, std::string content, int tag) {
     return var;
 }
 
+void MPIAsyncSendVars(std::shared_ptr<grpc::Channel> channel, int src, const Var &var) {
+    std::cout << "[MPIClient " << src << "]: async sending " << var.name << std::endl;
+    MPIClient mpiClient(channel, src);
+    mpiClient.SendRequest(var);
+}
+
 void RunClient(const int src, const std::string grpc) {
-    MPIClient mpiClient(grpc::CreateChannel(
-            grpc, grpc::InsecureChannelCredentials()), src);
+    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel("0.0.0.0:50051", grpc::InsecureChannelCredentials());
 
     int tag_base = 100;
     std::string name = "batch_norm@GREND_tag_";
     std::string content = "1:2:3:4:5:5::_tag_";
 
-    std::cout << "[MPIClient " << src << "]: send start" << std::endl;
-
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 1; i < 100; ++i) {
         int tag = tag_base + i;
         Var var = geneVar(grpc, name, content, tag);
-        mpiClient.SendRequest(var);
+        std::thread mpi_send_trhead(MPIAsyncSendVars, channel, src, var);
+        mpi_send_trhead.detach();
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(10000));
     std::cout << "[MPIClient " << src << "]: send over" << std::endl;
 }
 
 /*************************************** SERVER *******************************************/
 
+void MPIIrecvProcess(void *buf, int count, int source, int tag) {
+    MPI_Request request;
+    MPI_Status status;
 
-void run() {
-    for (auto i = 0; i < 5; i++) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(i * 1000));
-        std::cout << i << std::endl;
-    }
+    MPI_Irecv(buf, count, MPI_CHAR, source, tag, MPI_COMM_WORLD, &request);
+    MPI_Wait(&request, &status);
 }
 
-void MPIReceiveVars(const RequestContext &request, const ReplyContext &response) {
+void MPIAsyncRecvVars(const RequestContext &request, const ReplyContext &response) {
+    std::stringstream id;
+    id << std::this_thread::get_id();
+    std::string header = "[MPIReceiveVars " + id.str() + "] ";
 
-    std::cout << "[MPIReceiveVars " << std::this_thread::get_id() << "] get dst: " << response.dst() << std::endl;
+    std::cout << header << "source: " << request.src() << " tag: " << request.tag() << " var: " << request.var_name()
+              << std::endl;
 
-    std::cout << "[MPIReceiveVars " << std::this_thread::get_id() << "] doing something" << std::endl;
-
-    std::cout << "[MPIReceiveVars " << std::this_thread::get_id() << "] finish." << std::endl;
+    char bus[request.length()];
+    std::cout << header << "receive mpi data ing" << std::endl;
+    MPIIrecvProcess(&bus, request.length(), request.src(), request.tag());
+    std::cout << header << "receive mpi data is: " << bus << std::endl;
 }
 
 class MPIServiceImpl final : public mpis::MPIService::Service {
@@ -87,7 +97,7 @@ public:
         std::cout << "[MPIServer " << this->dst << "]: receive: "
                   << " src : " << request->src() << " name: " << request->var_name() << std::endl;
 
-        std::thread mpi_receive_thread(MPIReceiveVars,*request, *response);
+        std::thread mpi_receive_thread(MPIAsyncRecvVars, *request, *response);
         mpi_receive_thread.detach();
 
         response->set_dst(this->dst);
@@ -124,11 +134,12 @@ int main(int argc, char **argv) {
     int flag = 0;
     int rank = -1;
     int size = 1;
+    int provided;
 
     MPI_Initialized(&flag);
 
     if (!flag) {
-        MPI_Init(0, 0);
+        MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &size);
     }
@@ -140,7 +151,7 @@ int main(int argc, char **argv) {
         RunServer(rank);
     } else if (rank == 1) {
         std::cout << "rank 1: RunClient" << rank << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         RunClient(rank, "0.0.0.0:50051");
     } else {
         std::cout << "rank error: " << rank << std::endl;

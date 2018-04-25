@@ -35,9 +35,9 @@ void MPIClient::SendRequest(const Var &var) {
               << reply.dst()
               << std::endl;
 
-//    SendMPIRequest(var.value.c_str(), var.length, reply.dst(), var.tag);
-//    std::cout << "[MPIClient " << this->src << "]: " << " SendMPIRequest to: dst: " << reply.dst() << " finished"
-//              << std::endl;
+    SendMPIRequest(var.value.c_str(), var.length, reply.dst(), var.tag);
+    std::cout << "[MPIClient " << this->src << "]: " << " SendMPIRequest to: dst: " << reply.dst() << " finished"
+              << std::endl;
 }
 
 void MPIClient::SendMPIRequest(const char *buf, int length, int dst, int tag) {
