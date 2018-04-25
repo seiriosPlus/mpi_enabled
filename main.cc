@@ -44,7 +44,7 @@ void MPIAsyncSendVars(std::shared_ptr<grpc::Channel> channel, int src, const Var
 }
 
 void RunClient(const int src, const std::string grpc) {
-    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel("0.0.0.0:50051", grpc::InsecureChannelCredentials());
+    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(grpc, grpc::InsecureChannelCredentials());
 
     int tag_base = 100;
     std::string name = "batch_norm@GREND_tag_";
@@ -53,8 +53,8 @@ void RunClient(const int src, const std::string grpc) {
     for (int i = 1; i < 100; ++i) {
         int tag = tag_base + i;
         Var var = geneVar(grpc, name, content, tag);
-        std::thread mpi_send_trhead(MPIAsyncSendVars, channel, src, var);
-        mpi_send_trhead.detach();
+        std::thread mpi_send_thread(MPIAsyncSendVars, channel, src, var);
+        mpi_send_thread.detach();
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10000));
