@@ -9,6 +9,7 @@
 #include <mpi.h>
 
 #include "mpi.grpc.pb.h"
+#include "safe_queue.h"
 #include "mpi_client.h"
 #include "var.h"
 
@@ -37,11 +38,13 @@ Var geneVar(std::string grpc, std::string name, std::string content, int tag) {
     return var;
 }
 
+
 void MPIAsyncSendVars(std::shared_ptr<grpc::Channel> channel, int src, const Var &var) {
-    std::cout << "[MPIClient " << src << "]: async sending " << var.name << std::endl;
+    std::cout << "[MPI_CLIENT " << src << "]: async sending " << var.name << std::endl;
     MPIClient mpiClient(channel, src);
     mpiClient.SendRequest(var);
 }
+
 
 void RunClient(const int src, const std::string grpc) {
     std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(grpc, grpc::InsecureChannelCredentials());
@@ -63,6 +66,43 @@ void RunClient(const int src, const std::string grpc) {
 
 /*************************************** SERVER *******************************************/
 
+struct mpi_receive_log {
+    int src;
+    int tag;
+    int length;
+    std::string var_name;
+    std::string content;
+};
+
+void MPILogsProcess(SharedQueue<mpi_receive_log> &queue) {
+
+
+    std::cout << "MPI SERVER " << " MPILogsProcess WAIT TO PRINT LOG " << std::endl;
+
+    int consumedCounter = 0;
+    for (;;) {
+        if (!queue.empty()) {
+            mpi_receive_log receive_log = queue.front();
+
+            std::cout << "[MPI SERVER]: "
+                      << "src: " << receive_log.src
+                      << " tag: " << receive_log.tag
+                      << " length: " << receive_log.length
+                      << " var: " << receive_log.var_name
+                      << " content: " << receive_log.content
+                      << std::endl;
+
+            queue.pop_front();
+            consumedCounter++;
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (consumedCounter >= 99)
+            break;
+    }
+}
+
 void MPIIrecvProcess(void *buf, int count, int source, int tag) {
     MPI_Request request;
     MPI_Status status;
@@ -71,52 +111,64 @@ void MPIIrecvProcess(void *buf, int count, int source, int tag) {
     MPI_Wait(&request, &status);
 }
 
-void MPIAsyncRecvVars(const RequestContext &request, const ReplyContext &response) {
+
+void MPIAsyncRecvVars(const RequestContext &request,
+                      const ReplyContext &response, SharedQueue<mpi_receive_log> *queue) {
     std::stringstream id;
     id << std::this_thread::get_id();
-    std::string header = "[MPIReceiveVars " + id.str() + "] ";
-
-    std::cout << header << "source: " << request.src() << " tag: " << request.tag() << " var: " << request.var_name()
-              << std::endl;
 
     char bus[request.length()];
-    std::cout << header << "receive mpi data ing" << std::endl;
     MPIIrecvProcess(&bus, request.length(), request.src(), request.tag());
-    std::cout << header << "receive mpi data is: " << bus << std::endl;
+
+    mpi_receive_log receive_log;
+    receive_log.src = request.src();
+    receive_log.tag = request.tag();
+    receive_log.var_name = request.var_name();
+    receive_log.length = request.length();
+
+    std::string content_str(bus);
+    receive_log.content = content_str;
+
+    queue->push_back(receive_log);
 }
+
 
 class MPIServiceImpl final : public mpis::MPIService::Service {
 public:
-    MPIServiceImpl(int dst) {
+    MPIServiceImpl(int dst, SharedQueue<mpi_receive_log> *queue) {
+        this->queue = queue;
         this->dst = dst;
     }
 
     Status ISendRequest(::grpc::ServerContext *context, const ::mpis::RequestContext *request,
                         ::mpis::ReplyContext *response) override {
 
-        std::cout << "[MPIServer " << this->dst << "]: receive: "
-                  << " src : " << request->src() << " name: " << request->var_name() << std::endl;
-
-        std::thread mpi_receive_thread(MPIAsyncRecvVars, *request, *response);
+        std::thread mpi_receive_thread(MPIAsyncRecvVars, *request, *response, queue);
         mpi_receive_thread.detach();
-
         response->set_dst(this->dst);
         return Status::OK;
     };
 
 private:
     int dst;
+    SharedQueue<mpi_receive_log> *queue;
 };
 
 void RunServer(int dst) {
-    std::string server_address("0.0.0.0:50051");
-    MPIServiceImpl service(dst);
+
+    SharedQueue<mpi_receive_log> queue;
+    std::thread mpi_receive_log_thread(MPILogsProcess, std::ref(queue));
+    mpi_receive_log_thread.detach();
 
     grpc::ServerBuilder builder;
+
     // Listen on the given address without any authentication mechanism.
+    std::string server_address("0.0.0.0:50051");
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+
     // Register "service" as the instance through which we'll communicate with
     // clients. In this case it corresponds to an *synchronous* service.
+    MPIServiceImpl service(dst, &queue);
     builder.RegisterService(&service);
     // Finally assemble the server.
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
